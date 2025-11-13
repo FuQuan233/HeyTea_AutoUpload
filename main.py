@@ -242,7 +242,7 @@ def show_captcha(captcha_app_id, on_success, on_close=None):
 
 
 class HeyTeaUploader:
-    def __init__(self, root):
+    def __init__(self, root, scale_factor=1.0):
         self.root = root
         self.root.title("喜茶自定义杯贴上传工具")
         # geometry 已经在 main() 中根据 DPI 设置
@@ -261,6 +261,8 @@ class HeyTeaUploader:
         # 验证码冷却相关
         self.cooldown_seconds = 0  # 剩余冷却秒数
         self.cooldown_timer = None  # 冷却定时器
+
+        self.scale_factor = scale_factor
         
         self.create_widgets()
         self.load_config()  # 加载保存的配置
@@ -718,7 +720,7 @@ class HeyTeaUploader:
             image = Image.open(image_path)
             
             # 按比例调整图片大小以适应预览框（保持596:832的比例）
-            display_width = 300
+            display_width = 150 * self.scale_factor
             display_height = int(display_width * 832 / 596)
             
             # 如果高度超出，则按高度限制
@@ -882,7 +884,7 @@ def main():
     scaled_height = int(base_height * scale_factor)
     root.geometry(f"{scaled_width}x{scaled_height}")
     
-    app = HeyTeaUploader(root)
+    app = HeyTeaUploader(root, scale_factor)
     root.mainloop()
 
 
