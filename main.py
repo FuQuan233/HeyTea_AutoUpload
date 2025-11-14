@@ -40,7 +40,8 @@ VERSION = get_version()
 def run_captcha_window(captcha_app_id):
     """运行验证码窗口（子进程模式）"""
     import webview
-    
+    import platform
+
     html_content = f"""
 <!DOCTYPE html>
 <html lang="zh-cn">
@@ -220,7 +221,10 @@ def run_captcha_window(captcha_app_id):
             threading.Timer(0.1, lambda: os._exit(0)).start()
     
     window = webview.create_window('人机验证', html=html_content, width=500, height=600, resizable=False, js_api=Api())
-    webview.start()
+    if platform.system() == 'Darwin':
+        webview.start(debug=True)
+    else:
+        webview.start()
 
 
 def show_captcha(captcha_app_id, on_success, on_close=None):
@@ -275,6 +279,9 @@ class HeyTeaUploader:
         
         self.token = None
         self.selected_image_path = None
+        self.original_image_path = None  # 存储原始图片路径
+        self.threshold = 215  # 黑白转换阈值
+        self.conversion_method = "threshold"  # 转换方式
         self.current_mobile = None  # 存储当前正在验证的手机号
         self.captcha_ticket = None  # 存储验证码ticket
         self.captcha_randstr = None  # 存储验证码randstr
@@ -282,7 +289,7 @@ class HeyTeaUploader:
         self.nicknake = None
         self.user_main_id = None
         self.config_file = "heytea_config.json"  # 配置文件路径
-        
+
         # 验证码冷却相关
         self.cooldown_seconds = 0  # 剩余冷却秒数
         self.cooldown_timer = None  # 冷却定时器
@@ -383,28 +390,52 @@ class HeyTeaUploader:
         """创建上传Tab"""
         main_frame = ttk.Frame(self.upload_frame, padding="20")
         main_frame.pack(fill='both', expand=True)
-        
+
         # 标题
         title_label = ttk.Label(main_frame, text="上传自定义杯贴", font=("", 16, "bold"))
         title_label.pack(pady=(0, 20))
-        
+
         # 图片预览区域
         preview_frame = ttk.LabelFrame(main_frame, text="图片预览", padding="10")
         preview_frame.pack(fill='both', expand=True, pady=(0, 15))
-        
+
         self.preview_label = ttk.Label(preview_frame, text="未选择图片", background="#f0f0f0")
         self.preview_label.pack(fill='both', expand=True)
-        
+
+        # 转换方式选择区域
+        method_frame = ttk.Frame(main_frame)
+        method_frame.pack(fill='x', pady=(0, 10))
+
+        ttk.Label(method_frame, text="转换方式:").pack(side='left', padx=(0, 10))
+        self.method_var = tk.StringVar(value="threshold")
+        method_combo = ttk.Combobox(method_frame, textvariable=self.method_var, state='readonly', width=20)
+        method_combo['values'] = ('阈值法', 'Floyd-Steinberg抖动', '有序抖动', '自适应阈值', 'Otsu自动阈值', 'Atkinson抖动', '边缘保留')
+        method_combo.current(0)
+        method_combo.bind('<<ComboboxSelected>>', self.on_method_change)
+        method_combo.pack(side='left')
+
+        # 阈值调整区域
+        threshold_frame = ttk.Frame(main_frame)
+        threshold_frame.pack(fill='x', pady=(0, 10))
+
+        ttk.Label(threshold_frame, text="黑白阈值:").pack(side='left', padx=(0, 10))
+        self.threshold_var = tk.IntVar(value=215)
+        self.threshold_scale = ttk.Scale(threshold_frame, from_=0, to=255, variable=self.threshold_var,
+                                         orient='horizontal', command=self.on_threshold_change)
+        self.threshold_scale.pack(side='left', fill='x', expand=True, padx=(0, 10))
+        self.threshold_label = ttk.Label(threshold_frame, text="215")
+        self.threshold_label.pack(side='left')
+
         # 按钮区域
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill='x')
-        
+
         self.select_image_btn = ttk.Button(button_frame, text="选择图片", command=self.select_image)
         self.select_image_btn.pack(side='left', padx=(0, 10))
-        
+
         self.upload_btn = ttk.Button(button_frame, text="上传图片", command=self.upload_image, state='disabled')
         self.upload_btn.pack(side='left')
-        
+
         # 上传状态
         self.upload_status_label = ttk.Label(main_frame, text="")
         self.upload_status_label.pack(pady=(10, 0))
@@ -701,43 +732,221 @@ class HeyTeaUploader:
             error_msg = str(e)
             messagebox.showerror("错误", f"获取用户信息失败: {error_msg}")
     
+    def on_method_change(self, event=None):
+        """转换方式变化时的回调"""
+        method_map = {
+            '阈值法': 'threshold',
+            'Floyd-Steinberg抖动': 'floyd_steinberg',
+            '有序抖动': 'ordered',
+            '自适应阈值': 'adaptive',
+            'Otsu自动阈值': 'otsu',
+            'Atkinson抖动': 'atkinson',
+            '边缘保留': 'edge_preserve'
+        }
+        self.conversion_method = method_map.get(self.method_var.get(), 'threshold')
+
+        # 如果已选择图片，重新处理并预览
+        if self.original_image_path:
+            try:
+                processed_path = self.process_image(self.original_image_path)
+                self.selected_image_path = processed_path
+                self.show_image_preview(processed_path)
+            except Exception as e:
+                print(f"更新预览失败: {e}")
+
+    def on_threshold_change(self, value):
+        """阈值滑块变化时的回调"""
+        threshold = int(float(value))
+        self.threshold = threshold
+        self.threshold_label.config(text=str(threshold))
+
+        # 如果已选择图片，重新处理并预览
+        if self.original_image_path:
+            try:
+                processed_path = self.process_image(self.original_image_path, threshold)
+                self.selected_image_path = processed_path
+                self.show_image_preview(processed_path)
+            except Exception as e:
+                print(f"更新预览失败: {e}")
+
+    def process_image(self, input_path, threshold=None):
+        """处理图片：转换为黑白并调整尺寸"""
+        if threshold is None:
+            threshold = self.threshold
+
+        img = Image.open(input_path)
+
+        # 转换为灰度图
+        if img.mode != 'L':
+            img = img.convert('L')
+
+        # 根据转换方式应用不同算法
+        if self.conversion_method == 'threshold':
+            # 阈值法
+            img = img.point(lambda x: 255 if x > threshold else 0, mode='1')
+        elif self.conversion_method == 'floyd_steinberg':
+            # Floyd-Steinberg抖动
+            img = img.convert('1', dither=Image.FLOYDSTEINBERG)
+        elif self.conversion_method == 'ordered':
+            # 有序抖动
+            img = img.convert('1', dither=Image.ORDERED)
+        elif self.conversion_method == 'adaptive':
+            # 自适应阈值（简化版：使用局部平均）
+            import numpy as np
+            img_array = np.array(img)
+            block_size = 15
+            c = 10
+
+            # 计算局部平均
+            from scipy.ndimage import uniform_filter
+            local_mean = uniform_filter(img_array.astype(float), size=block_size)
+            binary = img_array > (local_mean - c)
+            img = Image.fromarray((binary * 255).astype(np.uint8), mode='L')
+            img = img.convert('1')
+        elif self.conversion_method == 'otsu':
+            # Otsu自动阈值
+            import numpy as np
+            img_array = np.array(img)
+
+            # 计算Otsu阈值
+            hist, bins = np.histogram(img_array.flatten(), 256, [0, 256])
+            total = img_array.size
+            current_max, threshold_otsu = 0, 0
+            sum_total, sum_foreground, weight_background, weight_foreground = 0, 0, 0, 0
+
+            for i in range(256):
+                sum_total += i * hist[i]
+
+            for i in range(256):
+                weight_background += hist[i]
+                if weight_background == 0:
+                    continue
+                weight_foreground = total - weight_background
+                if weight_foreground == 0:
+                    break
+                sum_foreground += i * hist[i]
+                mean_background = sum_foreground / weight_background
+                mean_foreground = (sum_total - sum_foreground) / weight_foreground
+                between_variance = weight_background * weight_foreground * (mean_background - mean_foreground) ** 2
+                if between_variance > current_max:
+                    current_max = between_variance
+                    threshold_otsu = i
+
+            img = img.point(lambda x: 255 if x > threshold_otsu else 0, mode='1')
+        elif self.conversion_method == 'atkinson':
+            # Atkinson抖动
+            import numpy as np
+            img_array = np.array(img, dtype=float)
+            h, w = img_array.shape
+
+            for y in range(h):
+                for x in range(w):
+                    old_pixel = img_array[y, x]
+                    new_pixel = 255 if old_pixel > 128 else 0
+                    img_array[y, x] = new_pixel
+                    error = (old_pixel - new_pixel) / 8
+
+                    # Atkinson扩散矩阵
+                    if x + 1 < w:
+                        img_array[y, x + 1] += error
+                    if x + 2 < w:
+                        img_array[y, x + 2] += error
+                    if y + 1 < h:
+                        if x - 1 >= 0:
+                            img_array[y + 1, x - 1] += error
+                        img_array[y + 1, x] += error
+                        if x + 1 < w:
+                            img_array[y + 1, x + 1] += error
+                    if y + 2 < h:
+                        img_array[y + 2, x] += error
+
+            img = Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8), mode='L')
+            img = img.convert('1')
+        elif self.conversion_method == 'edge_preserve':
+            # 边缘保留
+            import numpy as np
+            from scipy.ndimage import sobel
+
+            img_array = np.array(img)
+
+            # Sobel边缘检测
+            edge_x = sobel(img_array, axis=0)
+            edge_y = sobel(img_array, axis=1)
+            edge_magnitude = np.hypot(edge_x, edge_y)
+            edge_magnitude = (edge_magnitude / edge_magnitude.max() * 255).astype(np.uint8)
+
+            # 结合边缘和阈值
+            threshold_img = (img_array > threshold).astype(np.uint8) * 255
+            edge_binary = (edge_magnitude > 50).astype(np.uint8) * 255
+            combined = np.maximum(threshold_img, edge_binary)
+
+            img = Image.fromarray(combined, mode='L')
+            img = img.convert('1')
+
+        # 目标尺寸
+        target_width = 596
+        target_height = 832
+
+        # 计算缩放比例，保持宽高比
+        width_ratio = target_width / img.width
+        height_ratio = target_height / img.height
+        scale_ratio = min(width_ratio, height_ratio)
+
+        # 计算缩放后的尺寸
+        new_width = int(img.width * scale_ratio)
+        new_height = int(img.height * scale_ratio)
+
+        # 缩放图片
+        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+        # 创建白色背景画布
+        canvas = Image.new('RGB', (target_width, target_height), 'white')
+
+        # 计算居中位置
+        x_offset = (target_width - new_width) // 2
+        y_offset = (target_height - new_height) // 2
+
+        # 将处理后的图片粘贴到画布中央
+        img_rgb = img.convert('RGB')
+        canvas.paste(img_rgb, (x_offset, y_offset))
+
+        # 生成临时文件路径
+        import tempfile
+        temp_dir = tempfile.gettempdir()
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
+        output_path = os.path.join(temp_dir, f"{base_name}_processed.png")
+
+        # 保存为PNG
+        canvas.save(output_path, 'PNG')
+
+        return output_path
+
     def select_image(self):
         """选择图片"""
         file_path = filedialog.askopenfilename(
-            title="选择图片 (仅支持PNG格式)",
+            title="选择图片",
             filetypes=[
-                ("PNG图片", "*.png"),
+                ("图片文件", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.webp"),
                 ("所有文件", "*.*")
             ]
         )
-        
+
         if file_path:
             try:
-                # 先检查图片格式
-                if not file_path.lower().endswith('.png'):
-                    messagebox.showerror(
-                        "图片格式错误",
-                        "只支持PNG格式的图片！"
-                    )
-                    return
-                
-                # 检查图片尺寸
-                image = Image.open(file_path)
-                if image.size != (596, 832):
-                    messagebox.showerror(
-                        "图片尺寸错误",
-                        f"当前图片尺寸为 {image.width}x{image.height}\n必须使用 596x832 尺寸的图片！"
-                    )
-                    return
-                
-                # 尺寸正确，保存路径并显示预览
-                self.selected_image_path = file_path
-                self.show_image_preview(file_path)
-                
+                # 保存原始图片路径
+                self.original_image_path = file_path
+
+                # 处理图片
+                processed_path = self.process_image(file_path)
+
+                # 保存处理后的路径并显示预览
+                self.selected_image_path = processed_path
+                self.show_image_preview(processed_path)
+
                 if self.token:
                     self.upload_btn.config(state='normal')
             except Exception as e:
-                messagebox.showerror("错误", f"无法读取图片: {str(e)}")
+                messagebox.showerror("错误", f"无法处理图片: {str(e)}")
     
     def show_image_preview(self, image_path):
         """显示图片预览"""
@@ -907,19 +1116,26 @@ def main():
     # 正常运行主程序
     root = tk.Tk()
 
+    # macOS 特殊处理
+    if system == "Darwin":
+        root.lift()
+        root.attributes('-topmost', True)
+        root.after_idle(root.attributes, '-topmost', False)
+
     # 根据缩放比例调整窗口大小
     base_width = 600
     base_height = 530
-    
+
     # 对于 macOS，调整基础尺寸
     if system == "Darwin":
         base_height = 600  # macOS 需要更大的高度
-    
+
     scaled_width = int(base_width * scale_factor)
     scaled_height = int(base_height * scale_factor)
     root.geometry(f"{scaled_width}x{scaled_height}")
-    
+
     app = HeyTeaUploader(root, scale_factor)
+    root.update_idletasks()
     root.mainloop()
 
 
