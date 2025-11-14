@@ -414,6 +414,24 @@ class HeyTeaUploader:
         self.upload_btn = ttk.Button(button_frame, text="上传图片", command=self.upload_image, state='disabled')
         self.upload_btn.pack(side='left')
         
+        # 图片处理工具链接
+        link_frame = ttk.Frame(main_frame)
+        link_frame.pack(fill='x', pady=(10, 0))
+        
+        link_label = ttk.Label(
+            link_frame, 
+            text="点击打开图片处理工具",
+            foreground="blue",
+            cursor="hand2"
+        )
+        link_label.pack(side='left')
+        
+        def open_image_processor(event):
+            import webbrowser
+            webbrowser.open("https://power888777.github.io/heyteapng/")
+        
+        link_label.bind("<Button-1>", open_image_processor)
+        
         # 上传状态
         self.upload_status_label = ttk.Label(main_frame, text="")
         self.upload_status_label.pack(pady=(10, 0))
