@@ -18,7 +18,7 @@ jobs:
             platform: windows
             artifact_name: HeyTea-Uploader.exe
             asset_name: HeyTea-Uploader-${{ github.ref_name }}-windows.exe
-          - os: macos-latest
+          - os: macos-15-intel
             platform: macos
             artifact_name: 喜茶杯贴上传工具.app
             asset_name: HeyTea-Uploader-${{ github.ref_name }}-macos.dmg
