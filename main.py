@@ -843,11 +843,50 @@ class HeyTeaUploader:
             self.root.after(0, lambda: self.upload_status_label.config(text="上传成功！", foreground="green"))
             self.root.after(0, lambda: self.upload_btn.config(state='normal'))
             self.root.after(0, lambda: messagebox.showinfo("成功", "图片上传成功！"))
+            self.root.after(0, lambda: self.ask_for_star())
         except Exception as e:
             error_msg = str(e)
             self.root.after(0, lambda: self.upload_status_label.config(text="上传失败", foreground="red"))
             self.root.after(0, lambda: self.upload_btn.config(state='normal'))
             self.root.after(0, lambda msg=error_msg: messagebox.showerror("错误", f"上传失败: {msg}"))
+    
+    def ask_for_star(self):
+        """询问用户是否愿意给项目点 star（只弹一次）"""
+        import webbrowser
+        
+        # 检查是否已经询问过
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    if config.get("star_asked"):
+                        return  # 已经询问过，不再弹出
+        except:
+            pass
+        
+        # 使用自定义对话框询问
+        result = messagebox.askyesno(
+            "支持一下", 
+            "如果这个工具对您有帮助，\n能否给项目点个免费的 ⭐ Star 支持一下？\n\n这对我来说非常重要！😊",
+            icon='question'
+        )
+        
+        # 标记已经询问过
+        try:
+            config = {}
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+            config["star_asked"] = True
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except:
+            pass
+        
+        if result:
+            # 用户点击了"是"，打开 GitHub 仓库
+            webbrowser.open("https://github.com/FuQuan233/HeyTea_AutoUpload")
+            messagebox.showinfo("感谢", "感谢您的支持！❤️")
     
     def save_config(self):
         """保存配置到文件"""
